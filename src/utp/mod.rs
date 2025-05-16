@@ -9,6 +9,8 @@ pub mod connection;
 pub mod congestion;
 pub mod reliability;
 pub mod stream;
+pub mod dispatcher;
+pub mod socket_manager;
 
 // Re-export key public types or functions if desired, for easier access from outside the `utp` module.
 // For example, if UtpSocket is the main entry point:

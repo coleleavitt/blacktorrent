@@ -83,6 +83,7 @@ impl ConnectionState {
 }
 
 /// Error types for the uTP protocol
+
 #[derive(Debug, thiserror::Error)]
 pub enum UtpError {
     #[error("Connection timed out")]
@@ -95,7 +96,7 @@ pub enum UtpError {
     ConnectionReset,
 
     #[error("Network error: {0}")]
-    Network(#[from] std::io::Error),
+    Network(#[from] std::io::Error),  // Remove from Clone derivation
 
     #[error("Invalid packet format")]
     InvalidPacket,
@@ -115,7 +116,6 @@ pub enum UtpError {
     #[error("Window size too small")]
     WindowTooSmall,
 }
-
 /// Bandwidth types for statistics collection
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BandwidthType {

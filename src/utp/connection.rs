@@ -252,4 +252,3 @@ impl Connection {
         &self.sent_packets
     }
 }
-

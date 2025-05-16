@@ -1,0 +1,567 @@
+warning: unused import: `current_micros`
+ --> src/utp/congestion.rs:3:26
+  |
+3 | use crate::utp::common::{current_micros, DEFAULT_TARGET_DELAY_MICROS, MAX_CWND_INCREASE_BYTES_PER_RTT, MIN_WINDOW_SIZE_BYTES, DEFAULT_MAX...
+  |                          ^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` on by default
+
+warning: unexpected `cfg` condition value: `logging`
+   --> src/utp/socket_manager.rs:306:11
+    |
+306 |     #[cfg(feature = "logging")]
+    |           ^^^^^^^^^^^^^^^^^^^ help: remove the condition
+    |
+    = note: no expected values for `feature`
+    = help: consider adding `logging` as a feature in `Cargo.toml`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: unused import: `socket::UtpSocket`
+  --> src/utp/mod.rs:17:9
+   |
+17 | pub use socket::UtpSocket;
+   |         ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `stream::UtpStream`
+  --> src/utp/mod.rs:18:9
+   |
+18 | pub use stream::UtpStream; // If you implement a UtpStream similar to rust-utp[2]
+   |         ^^^^^^^^^^^^^^^^^
+
+warning: unused import: `common::UtpError`
+  --> src/utp/mod.rs:19:9
+   |
+19 | pub use common::UtpError;
+   |         ^^^^^^^^^^^^^^^^
+
+warning: variable does not need to be mutable
+  --> src/utp/stream.rs:55:25
+   |
+55 |                     let mut socket_guard = stream.socket.lock().unwrap();
+   |                         ----^^^^^^^^^^^^
+   |                         |
+   |                         help: remove this `mut`
+   |
+   = note: `#[warn(unused_mut)]` on by default
+
+warning: variable does not need to be mutable
+   --> src/utp/stream.rs:100:25
+    |
+100 |                     let mut socket_guard = self.socket.lock().unwrap();
+    |                         ----^^^^^^^^^^^^
+    |                         |
+    |                         help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src/utp/dispatcher.rs:189:33
+    |
+189 | ...                   let mut socket_guard = socket.lock().await;
+    |                           ----^^^^^^^^^^^^
+    |                           |
+    |                           help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src/utp/dispatcher.rs:231:13
+    |
+231 |         let mut socket = UtpSocket::new(local_addr, addr);
+    |             ----^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: variable does not need to be mutable
+   --> src/utp/dispatcher.rs:287:13
+    |
+287 |         let mut socket_guard = socket.lock().await;
+    |             ----^^^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: unused variable: `rm`
+   --> src/utp/connection.rs:119:65
+    |
+119 |     pub fn create_syn_packet(&mut self, cc: &CongestionControl, rm: &ReliabilityManager) -> UtpPacket {
+    |                                                                 ^^ help: if this is intentional, prefix it with an underscore: `_rm`
+    |
+    = note: `#[warn(unused_variables)]` on by default
+
+warning: unreachable pattern
+   --> src/utp/connection.rs:243:13
+    |
+243 |             _ => { /* Unknown packet type */ }
+    |             ^ no value can reach this
+    |
+note: multiple earlier patterns match some of the same values
+   --> src/utp/connection.rs:243:13
+    |
+191 |             ST_SYN => { // Should be handled by a listener to create a new connection typically
+    |             ------ matches some of the same values
+...
+209 |             ST_STATE => { // ACK packet
+    |             -------- matches some of the same values
+...
+213 |             ST_DATA => {
+    |             ------- matches some of the same values
+...
+230 |             ST_FIN => {
+    |             ------ matches some of the same values
+...
+243 |             _ => { /* Unknown packet type */ }
+    |             ^ ...and 1 other patterns collectively make this unreachable
+    = note: `#[warn(unreachable_patterns)]` on by default
+
+warning: unused variable: `ST_RESET`
+   --> src/utp/connection.rs:239:13
+    |
+239 |             ST_RESET => {
+    |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_ST_RESET`
+
+warning: variable does not need to be mutable
+   --> src/utp/stream.rs:136:21
+    |
+136 |                 let mut socket_guard = socket.lock().unwrap();
+    |                     ----^^^^^^^^^^^^
+    |                     |
+    |                     help: remove this `mut`
+
+warning: unused variable: `data`
+  --> src/main.rs:46:45
+   |
+46 |     pub fn verify_piece(piece_index: usize, data: &[u8]) -> bool {
+   |                                             ^^^^ help: if this is intentional, prefix it with an underscore: `_data`
+
+warning: constant `ST_RESET` is never used
+  --> src/utp/common.rs:13:11
+   |
+13 | pub const ST_RESET: u8 = 3;  // Connection reset packet
+   |           ^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` on by default
+
+warning: constant `ST_NUM_STATES` is never used
+  --> src/utp/common.rs:15:11
+   |
+15 | pub const ST_NUM_STATES: u8 = 5; // Total number of packet types
+   |           ^^^^^^^^^^^^^
+
+warning: constant `MAX_RTO_MICROS` is never used
+  --> src/utp/common.rs:23:11
+   |
+23 | pub const MAX_RTO_MICROS: u32 = 60_000_000; // Maximum RTO 60 seconds
+   |           ^^^^^^^^^^^^^^
+
+warning: constant `UDP_IPV4_OVERHEAD` is never used
+  --> src/utp/common.rs:26:11
+   |
+26 | pub const UDP_IPV4_OVERHEAD: usize = 20 /* IP */ + 8 /* UDP */;
+   |           ^^^^^^^^^^^^^^^^^
+
+warning: constant `UDP_IPV6_OVERHEAD` is never used
+  --> src/utp/common.rs:27:11
+   |
+27 | pub const UDP_IPV6_OVERHEAD: usize = 40 /* IP */ + 8 /* UDP */;
+   |           ^^^^^^^^^^^^^^^^^
+
+warning: constant `SEQ_NR_MASK` is never used
+  --> src/utp/common.rs:31:11
+   |
+31 | pub const SEQ_NR_MASK: u16 = 0xFFFF;
+   |           ^^^^^^^^^^^
+
+warning: constant `ACK_NR_MASK` is never used
+  --> src/utp/common.rs:32:11
+   |
+32 | pub const ACK_NR_MASK: u16 = 0xFFFF;
+   |           ^^^^^^^^^^^
+
+warning: constant `TIMESTAMP_MASK` is never used
+  --> src/utp/common.rs:33:11
+   |
+33 | pub const TIMESTAMP_MASK: u32 = 0xFFFFFFFF;
+   |           ^^^^^^^^^^^^^^
+
+warning: constant `DUPLICATE_ACKS_BEFORE_RESEND` is never used
+  --> src/utp/common.rs:36:11
+   |
+36 | pub const DUPLICATE_ACKS_BEFORE_RESEND: u32 = 3;
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `ACK_NR_ALLOWED_WINDOW` is never used
+  --> src/utp/common.rs:37:11
+   |
+37 | pub const ACK_NR_ALLOWED_WINDOW: u32 = DUPLICATE_ACKS_BEFORE_RESEND;
+   |           ^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `MAX_WINDOW_DECAY` is never used
+  --> src/utp/common.rs:38:11
+   |
+38 | pub const MAX_WINDOW_DECAY: i64 = 100; // ms
+   |           ^^^^^^^^^^^^^^^^
+
+warning: constant `TIMEOUT_CHECK_INTERVAL` is never used
+  --> src/utp/common.rs:41:11
+   |
+41 | pub const TIMEOUT_CHECK_INTERVAL: u64 = 500; // ms
+   |           ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `KEEPALIVE_INTERVAL` is never used
+  --> src/utp/common.rs:42:11
+   |
+42 | pub const KEEPALIVE_INTERVAL: u64 = 29000; // 29 seconds
+   |           ^^^^^^^^^^^^^^^^^^
+
+warning: constant `CONNECT_TIMEOUT` is never used
+  --> src/utp/common.rs:43:11
+   |
+43 | pub const CONNECT_TIMEOUT: u64 = 6000; // 6 seconds
+   |           ^^^^^^^^^^^^^^^
+
+warning: constant `DELAYED_ACK_TIME` is never used
+  --> src/utp/common.rs:44:11
+   |
+44 | pub const DELAYED_ACK_TIME: u64 = 20; // 20ms before sending delayed ACK
+   |           ^^^^^^^^^^^^^^^^
+
+warning: constant `REORDER_BUFFER_SIZE` is never used
+  --> src/utp/common.rs:47:11
+   |
+47 | pub const REORDER_BUFFER_SIZE: usize = 32;
+   |           ^^^^^^^^^^^^^^^^^^^
+
+warning: constant `REORDER_BUFFER_MAX_SIZE` is never used
+  --> src/utp/common.rs:48:11
+   |
+48 | pub const REORDER_BUFFER_MAX_SIZE: usize = 1024;
+   |           ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `OUTGOING_BUFFER_MAX_SIZE` is never used
+  --> src/utp/common.rs:49:11
+   |
+49 | pub const OUTGOING_BUFFER_MAX_SIZE: usize = 1024;
+   |           ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: variants `Uninitialized` and `SynRecv` are never constructed
+  --> src/utp/common.rs:54:5
+   |
+53 | pub enum ConnectionState {
+   |          --------------- variants in this enum
+54 |     Uninitialized,       // Initial state
+   |     ^^^^^^^^^^^^^
+...
+57 |     SynRecv,             // Connect received
+   |     ^^^^^^^
+   |
+   = note: `ConnectionState` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: method `to_string` is never used
+  --> src/utp/common.rs:68:12
+   |
+67 | impl ConnectionState {
+   | -------------------- method in this implementation
+68 |     pub fn to_string(&self) -> &'static str {
+   |            ^^^^^^^^^
+
+warning: variants `Timeout`, `ConnectionRefused`, `ConnectionReset`, `InvalidPacket`, `MaxRetransmit`, and `WindowTooSmall` are never constructed
+   --> src/utp/common.rs:90:5
+    |
+88  | pub enum UtpError {
+    |          -------- variants in this enum
+89  |     #[error("Connection timed out")]
+90  |     Timeout,
+    |     ^^^^^^^
+...
+93  |     ConnectionRefused,
+    |     ^^^^^^^^^^^^^^^^^
+...
+96  |     ConnectionReset,
+    |     ^^^^^^^^^^^^^^^
+...
+102 |     InvalidPacket,
+    |     ^^^^^^^^^^^^^
+...
+114 |     MaxRetransmit,
+    |     ^^^^^^^^^^^^^
+...
+117 |     WindowTooSmall,
+    |     ^^^^^^^^^^^^^^
+    |
+    = note: `UtpError` has a derived impl for the trait `Debug`, but this is intentionally ignored during dead code analysis
+
+warning: variants `PayloadBandwidth`, `HeaderOverhead`, `AckOverhead`, `ConnectOverhead`, and `CloseOverhead` are never constructed
+   --> src/utp/common.rs:122:5
+    |
+121 | pub enum BandwidthType {
+    |          ------------- variants in this enum
+122 |     PayloadBandwidth,
+    |     ^^^^^^^^^^^^^^^^
+123 |     HeaderOverhead,
+    |     ^^^^^^^^^^^^^^
+124 |     AckOverhead,
+    |     ^^^^^^^^^^^
+125 |     ConnectOverhead,
+    |     ^^^^^^^^^^^^^^^
+126 |     CloseOverhead,
+    |     ^^^^^^^^^^^^^
+    |
+    = note: `BandwidthType` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: associated items `now`, `wrapping_sub`, and `as_millis` are never used
+   --> src/utp/common.rs:135:12
+    |
+133 | impl Timestamp {
+    | -------------- associated items in this implementation
+134 |     /// Get the current time as a microsecond timestamp
+135 |     pub fn now() -> Self {
+    |            ^^^
+...
+140 |     pub fn wrapping_sub(self, other: Self) -> u32 {
+    |            ^^^^^^^^^^^^
+...
+146 |     pub fn as_millis(&self) -> u64 {
+    |            ^^^^^^^^^
+
+warning: function `clamp` is never used
+   --> src/utp/common.rs:173:8
+    |
+173 | pub fn clamp<T: PartialOrd>(val: T, min: T, max: T) -> T {
+    |        ^^^^^
+
+warning: function `current_millis` is never used
+   --> src/utp/common.rs:192:8
+    |
+192 | pub fn current_millis() -> u64 {
+    |        ^^^^^^^^^^^^^^
+
+warning: function `random_u16` is never used
+   --> src/utp/common.rs:197:8
+    |
+197 | pub fn random_u16() -> u16 {
+    |        ^^^^^^^^^^
+
+warning: function `random_u32` is never used
+   --> src/utp/common.rs:202:8
+    |
+202 | pub fn random_u32() -> u32 {
+    |        ^^^^^^^^^^
+
+warning: multiple fields are never read
+   --> src/utp/common.rs:209:9
+    |
+208 | pub struct UtpSocketStats {
+    |            -------------- fields in this struct
+209 |     pub packets_received: u64,
+    |         ^^^^^^^^^^^^^^^^
+210 |     pub bytes_received: u64,
+    |         ^^^^^^^^^^^^^^
+211 |     pub packets_sent: u64,
+    |         ^^^^^^^^^^^^
+212 |     pub bytes_sent: u64,
+    |         ^^^^^^^^^^
+213 |     pub packets_lost: u64,
+    |         ^^^^^^^^^^^^
+214 |     pub packets_retransmitted: u64,
+    |         ^^^^^^^^^^^^^^^^^^^^^
+215 |     pub bytes_retransmitted: u64,
+    |         ^^^^^^^^^^^^^^^^^^^
+216 |     pub duplicate_acks_received: u64,
+    |         ^^^^^^^^^^^^^^^^^^^^^^^
+217 |     pub rtt_samples: u64,
+    |         ^^^^^^^^^^^
+218 |     pub min_rtt: u32,
+    |         ^^^^^^^
+219 |     pub max_rtt: u32,
+    |         ^^^^^^^
+220 |     pub sum_rtt: u64,
+    |         ^^^^^^^
+    |
+    = note: `UtpSocketStats` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: method `avg_rtt` is never used
+   --> src/utp/common.rs:225:12
+    |
+223 | impl UtpSocketStats {
+    | ------------------- method in this implementation
+224 |     /// Calculate average RTT
+225 |     pub fn avg_rtt(&self) -> u32 {
+    |            ^^^^^^^
+
+warning: struct `SackExtensionHeader` is never constructed
+  --> src/utp/packet.rs:26:12
+   |
+26 | pub struct SackExtensionHeader {
+   |            ^^^^^^^^^^^^^^^^^^^
+
+warning: methods `timestamp_micros` and `timestamp_diff_micros` are never used
+  --> src/utp/packet.rs:66:12
+   |
+31 | impl UtpHeader {
+   | -------------- methods in this implementation
+...
+66 |     pub fn timestamp_micros(&self) -> u32 {
+   |            ^^^^^^^^^^^^^^^^
+...
+70 |     pub fn timestamp_diff_micros(&self) -> u32 {
+   |            ^^^^^^^^^^^^^^^^^^^^^
+
+warning: field `remote_addr` is never read
+   --> src/utp/packet.rs:141:9
+    |
+137 | pub struct UtpPacket {
+    |            --------- field in this struct
+...
+141 |     pub remote_addr: SocketAddr, // Source/destination address
+    |         ^^^^^^^^^^^
+    |
+    = note: `UtpPacket` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+
+warning: field `local_addr` is never read
+  --> src/utp/socket.rs:25:16
+   |
+24 | pub struct UtpSocketInternal {
+   |            ----------------- field in this struct
+25 |     pub(crate) local_addr: SocketAddr,
+   |                ^^^^^^^^^^
+
+warning: methods `connect`, `get_rtt`, `get_mtu`, and `is_send_buffer_empty` are never used
+   --> src/utp/socket.rs:169:12
+    |
+141 | impl UtpSocket {
+    | -------------- methods in this implementation
+...
+169 |     pub fn connect(&self) -> Result<(), UtpError> {
+    |            ^^^^^^^
+...
+324 |     pub fn get_rtt(&self) -> u32 {
+    |            ^^^^^^^
+...
+328 |     pub fn get_mtu(&self) -> usize {
+    |            ^^^^^^^
+...
+332 |     pub fn is_send_buffer_empty(&self) -> bool {
+    |            ^^^^^^^^^^^^^^^^^^^^
+
+warning: associated items `new_for_listener`, `initiate_connection`, `get_seq_nr`, `get_ack_nr`, and `get_sent_packets` are never used
+   --> src/utp/connection.rs:54:12
+    |
+31  | impl Connection {
+    | --------------- associated items in this implementation
+...
+54  |     pub fn new_for_listener(remote_addr: SocketAddr, syn_packet: &UtpPacket) -> Self {
+    |            ^^^^^^^^^^^^^^^^
+...
+69  |     pub fn initiate_connection(&mut self) {
+    |            ^^^^^^^^^^^^^^^^^^^
+...
+249 |     pub fn get_seq_nr(&self) -> u16 { self.seq_nr }
+    |            ^^^^^^^^^^
+250 |     pub fn get_ack_nr(&self) -> u16 { self.ack_nr }
+    |            ^^^^^^^^^^
+251 |     pub fn get_sent_packets(&self) -> &std::collections::HashMap<u16, SentPacketInfo> {
+    |            ^^^^^^^^^^^^^^^^
+
+warning: field `base_delay_micros` is never read
+  --> src/utp/congestion.rs:17:5
+   |
+8  | pub struct CongestionControl {
+   |            ----------------- field in this struct
+...
+17 |     base_delay_micros: Option<u32>, // Minimum observed one-way delay (or RTT component)
+   |     ^^^^^^^^^^^^^^^^^
+
+warning: method `can_send` is never used
+  --> src/utp/congestion.rs:46:12
+   |
+22 | impl CongestionControl {
+   | ---------------------- method in this implementation
+...
+46 |     pub fn can_send(&self, packet_size: usize) -> bool {
+   |            ^^^^^^^^
+
+warning: fields `seq_nr`, `packet_data`, and `is_syn` are never read
+  --> src/utp/reliability.rs:13:9
+   |
+12 | pub struct SentPacketInfo {
+   |            -------------- fields in this struct
+13 |     pub seq_nr: u16,
+   |         ^^^^^^
+...
+17 |     pub packet_data: Vec<u8>,
+   |         ^^^^^^^^^^^
+18 |     pub is_syn: bool,
+   |         ^^^^^^
+   |
+   = note: `SentPacketInfo` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: methods `set_needs_ack`, `needs_ack_packet`, and `ack_sent` are never used
+   --> src/utp/reliability.rs:196:12
+    |
+41  | impl ReliabilityManager {
+    | ----------------------- methods in this implementation
+...
+196 |     pub fn set_needs_ack(&mut self) {
+    |            ^^^^^^^^^^^^^
+...
+200 |     pub fn needs_ack_packet(&self) -> bool {
+    |            ^^^^^^^^^^^^^^^^
+...
+204 |     pub fn ack_sent(&mut self) {
+    |            ^^^^^^^^
+
+warning: constant `CONNECT_TIMEOUT_SECS` is never used
+  --> src/utp/stream.rs:15:7
+   |
+15 | const CONNECT_TIMEOUT_SECS: u64 = 10;
+   |       ^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `TICK_INTERVAL_MS` is never used
+  --> src/utp/stream.rs:16:7
+   |
+16 | const TICK_INTERVAL_MS: u64 = 50;
+   |       ^^^^^^^^^^^^^^^^
+
+warning: associated items `connect` and `close_write` are never used
+  --> src/utp/stream.rs:29:18
+   |
+27 | impl UtpStream {
+   | -------------- associated items in this implementation
+28 |     /// Connects to a remote uTP peer asynchronously.
+29 |     pub async fn connect(local_bind_addr: SocketAddr, remote_addr: SocketAddr) -> Result<Self, UtpError> {
+   |                  ^^^^^^^
+...
+90 |     pub async fn close_write(&mut self) -> Result<(), UtpError> {
+   |                  ^^^^^^^^^^^
+
+warning: function `start_background_ticker` is never used
+   --> src/utp/stream.rs:126:4
+    |
+126 | fn start_background_ticker(stream: &UtpStream) {
+    |    ^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `announce` is never used
+  --> src/main.rs:25:16
+   |
+25 |         pub fn announce(tracker_url: &str, torrent_hash: &str) {
+   |                ^^^^^^^^
+
+warning: function `request_piece` is never used
+  --> src/main.rs:42:12
+   |
+42 |     pub fn request_piece(peer_id: &str, piece_index: usize) {
+   |            ^^^^^^^^^^^^^
+
+warning: function `verify_piece` is never used
+  --> src/main.rs:46:12
+   |
+46 |     pub fn verify_piece(piece_index: usize, data: &[u8]) -> bool {
+   |            ^^^^^^^^^^^^
+
+warning: variable `ST_RESET` should have a snake case name
+   --> src/utp/connection.rs:239:13
+    |
+239 |             ST_RESET => {
+    |             ^^^^^^^^ help: convert the identifier to snake case: `st_reset`
+    |
+    = note: `#[warn(non_snake_case)]` on by default
+
+warning: `blacktorrent` (bin "blacktorrent") generated 62 warnings (run `cargo fix --bin "blacktorrent"` to apply 10 suggestions)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s

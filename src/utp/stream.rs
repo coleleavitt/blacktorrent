@@ -1,90 +1,167 @@
 // utp/stream.rs
 
-use crate::utp::common::UtpError;
-use crate::utp::socket::UtpSocket; // Assuming UtpSocket is made public or accessible
+use crate::utp::common::{ConnectionState, UtpError};
+use crate::utp::socket::UtpSocket;
 use std::net::SocketAddr;
-use std::io; // For Read/Write/AsyncRead/AsyncWrite traits
+use std::io;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-// For a synchronous version:
-// use std::io::{Read, Write};
-// For an asynchronous version (e.g., with Tokio):
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::time::timeout;
 use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::task::{Context, Poll, Waker};
 
+const CONNECT_TIMEOUT_SECS: u64 = 10;
+const TICK_INTERVAL_MS: u64 = 50;
 
 /// A uTP stream between a local and a remote socket.
-/// This would be the primary public interface for applications.
+/// This provides an async interface to the uTP protocol.
 pub struct UtpStream {
-    socket: UtpSocket, // Or Arc<UtpSocket> if shared or managed by a dispatcher
-    // In an async context, you'd also need a way to be notified when the
-    // underlying UDP socket has data for this UtpSocket, or when timers expire.
-    // This often involves a central dispatcher task and channels (e.g. tokio::mpsc).
+    socket: Arc<Mutex<UtpSocket>>,
+    read_waker: Arc<Mutex<Option<Waker>>>,
+    write_waker: Arc<Mutex<Option<Waker>>>,
+    running: Arc<Mutex<bool>>,
 }
 
 impl UtpStream {
-    /// Connects to a remote uTP peer.
-    /// This would typically involve finding a local UDP port, sending a SYN,
-    /// and waiting for a SYN-ACK.
-    /// In an async system, this would be `async fn connect`.
-    pub async fn connect(local_bind_addr: SocketAddr, remote_addr: SocketAddr /*, dispatcher_sender: mpsc::Sender<DispatcherCommand> */) -> Result<Self, UtpError> {
-        // 1. Create a new UtpSocket instance.
-        //    In a real system, this UtpSocket would be registered with a global
-        //    UDP socket manager/dispatcher that handles raw UDP send/recv and timers.
-        let socket = UtpSocket::new(local_bind_addr, remote_addr);
-        socket.connect()?; // Initiates SYN sending process (queues SYN)
+    /// Connects to a remote uTP peer asynchronously.
+    pub async fn connect(local_bind_addr: SocketAddr, remote_addr: SocketAddr) -> Result<Self, UtpError> {
+        // Create the socket and initiate connection
+        let socket = Arc::new(Mutex::new(UtpSocket::new(local_bind_addr, remote_addr)));
 
-        // 2. Wait for connection to be established (UtpSocket state becomes Connected).
-        //    This involves polling the socket's tick() method or awaiting a signal
-        //    from the dispatcher. For this skeleton, we'll simplify.
-        //    A real implementation would loop, calling socket.tick() and handling
-        //    UDP send/recv until state is Connected or an error occurs.
-        //
-        // Example simplified polling loop for async (conceptual):
-        // loop {
-        //    tokio::select! {
-        //        _ = tokio::time::sleep(Duration::from_millis(50)) => { // Tick interval
-        //            if let Some(data_to_send_udp) = socket.tick()? {
-        //                // Send data_to_send_udp over the actual UDP socket
-        //                // global_udp_socket.send_to(&data_to_send_udp, socket.remote_address()).await?;
-        //            }
-        //        }
-        //        // udp_recv_result = global_udp_socket.recv_from() => {
-        //        //    socket.process_incoming_datagram(buf, addr);
-        //        // }
-        //    }
-        //    if socket.get_state() == crate::utp::common::ConnectionState::Connected { break; }
-        //    if socket.get_state() == crate::utp::common::ConnectionState::Reset ||
-        //       socket.get_state() == crate::utp::common::ConnectionState::Closed { // or Timeout
-        //        return Err(UtpError::ConnectionRefused); // Or more specific error
-        //    }
-        // }
+        // Start connection
+        {
+            let socket_guard = socket.lock().unwrap();
+            socket_guard.connect()?;
+        }
 
-        // For now, assume connection happens "magically" after calling connect.
-        // A real implementation needs an event loop or dispatcher.
-        // This is a MAJOR simplification.
-        println!("UtpStream: connect called. Waiting for connection (simplified).");
-        // A proper async connect would involve a loop and potentially a timeout.
-        // We'd need to simulate ticks or have a mock dispatcher.
-        // For this skeleton, we can't fully implement the async wait here.
-        // Pretend it's connected for the sake of API demonstration.
-        // A real version would poll `socket.get_state()` and `socket.tick()`.
+        let read_waker = Arc::new(Mutex::new(None));
+        let write_waker = Arc::new(Mutex::new(None));
+        let running = Arc::new(Mutex::new(true));
 
-        Ok(Self { socket })
+        let stream = Self {
+            socket,
+            read_waker,
+            write_waker,
+            running,
+        };
+
+        // Wait for the connection to be established with a timeout
+        timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS), async {
+            loop {
+                // Process tick to move the connection state machine
+                let data_to_send = {
+                    let mut socket_guard = stream.socket.lock().unwrap();
+                    socket_guard.tick()?
+                };
+
+                if let Some(data) = data_to_send {
+                    // In a real implementation, this would send the data via UDP
+                    println!("Would send {} bytes to {}", data.len(), remote_addr);
+                }
+
+                // Check if we're connected
+                let state = {
+                    let socket_guard = stream.socket.lock().unwrap();
+                    socket_guard.get_state()
+                };
+
+                if state == ConnectionState::Connected {
+                    return Ok::<_, UtpError>(());
+                }
+
+                // Check for connection failure
+                if matches!(state, ConnectionState::Reset | ConnectionState::Closed) {
+                    return Err(UtpError::ConnectionRefused);
+                }
+
+                tokio::time::sleep(Duration::from_millis(TICK_INTERVAL_MS)).await;
+            }
+        }).await.map_err(|_| UtpError::Timeout)??;
+
+        // Start background task for socket ticking
+        start_background_ticker(&stream);
+
+        Ok(stream)
     }
 
-    /// Closes the write half of the connection.
-    /// This would send a FIN packet.
-    /// In an async system, this would be `async fn close`.
+    /// Closes the write half of the connection by sending a FIN packet.
     pub async fn close_write(&mut self) -> Result<(), UtpError> {
-        self.socket.close() // This queues a FIN
-        // Similar to connect, a loop would be needed to ensure FIN is sent and ACKed.
+        {
+            let socket_guard = self.socket.lock().unwrap();
+            socket_guard.close()?;
+        }
+
+        // Wait for the FIN to be acknowledged or the connection to close
+        timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS), async {
+            loop {
+                let data_sent = {
+                    let mut socket_guard = self.socket.lock().unwrap();
+                    socket_guard.tick()?
+                };
+
+                if data_sent.is_some() {
+                    // Data was processed (FIN sent)
+                }
+
+                let state = {
+                    let socket_guard = self.socket.lock().unwrap();
+                    socket_guard.get_state()
+                };
+
+                if matches!(state, ConnectionState::Closed | ConnectionState::Reset) {
+                    return Ok::<_, UtpError>(());
+                }
+
+                tokio::time::sleep(Duration::from_millis(TICK_INTERVAL_MS)).await;
+            }
+        }).await.map_err(|_| UtpError::Timeout)??;
+
+        Ok(())
     }
 }
 
-// Implement AsyncRead and AsyncWrite for UtpStream using Tokio
-// This requires the UtpSocket's read_data/write_data and tick methods
-// to be adapted or called appropriately within an async context.
+// Starts a background task that processes socket events
+fn start_background_ticker(stream: &UtpStream) {
+    let socket = Arc::clone(&stream.socket);
+    let read_waker = Arc::clone(&stream.read_waker);
+    let write_waker = Arc::clone(&stream.write_waker);
+    let running = Arc::clone(&stream.running);
+
+    tokio::spawn(async move {
+        while *running.lock().unwrap() {
+            // Process socket tick
+            let result = {
+                let mut socket_guard = socket.lock().unwrap();
+                socket_guard.tick()
+            };
+
+            if let Ok(Some(_)) = result {
+                // Wake up waiting readers/writers
+                if let Some(waker) = read_waker.lock().unwrap().take() {
+                    waker.wake();
+                }
+                if let Some(waker) = write_waker.lock().unwrap().take() {
+                    waker.wake();
+                }
+            }
+
+            // Check if connection is closed
+            let state = {
+                let socket_guard = socket.lock().unwrap();
+                socket_guard.get_state()
+            };
+
+            if matches!(state, 
+                ConnectionState::Closed | ConnectionState::Reset | ConnectionState::Destroying) {
+                break;
+            }
+
+            tokio::time::sleep(Duration::from_millis(TICK_INTERVAL_MS)).await;
+        }
+    });
+}
 
 impl AsyncRead for UtpStream {
     fn poll_read(
@@ -92,36 +169,43 @@ impl AsyncRead for UtpStream {
         cx: &mut Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
-        // This is highly conceptual as it depends on how UtpSocket is driven.
-        // 1. Call self.socket.tick() to process incoming packets and state changes.
-        //    If tick() needs to send UDP data, it should be handled (e.g. by a background task).
-        //    If tick() indicates an error, convert to io::Error.
-        //
-        // self.get_mut().socket.tick().map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-
-        // 2. Try to read from UtpSocket's internal receive buffer.
-        let socket = &mut self.get_mut().socket;
-        // Create a temporary Vec to pass to socket.read_data
+        let this = self.get_mut();
         let mut temp_buf = vec![0u8; buf.remaining()];
-        match socket.read_data(&mut temp_buf) {
-            Ok(n) if n > 0 => {
+
+        // Try to read data
+        let result = {
+            let socket_guard = this.socket.lock().unwrap();
+            socket_guard.read_data(&mut temp_buf)
+        };
+
+        match result {
+            Ok(0) => {
+                // Check if we've reached EOF
+                let state = {
+                    let socket_guard = this.socket.lock().unwrap();
+                    socket_guard.get_state()
+                };
+
+                if matches!(state, 
+                    ConnectionState::Closed | ConnectionState::Reset | ConnectionState::FinRecv) {
+                    return Poll::Ready(Ok(()));
+                }
+
+                // No data yet, store waker for notification
+                *this.read_waker.lock().unwrap() = Some(cx.waker().clone());
+                Poll::Pending
+            },
+            Ok(n) => {
+                // Copy data into the output buffer
                 buf.put_slice(&temp_buf[..n]);
                 Poll::Ready(Ok(()))
-            }
-            Ok(0) => { // EOF or no data currently available
-                // If socket state is Closed/Reset, it's EOF.
-                // Otherwise, no data now, need to be woken up.
-                if socket.get_state() == crate::utp::common::ConnectionState::Closed ||
-                    socket.get_state() == crate::utp::common::ConnectionState::Reset {
-                    Poll::Ready(Ok(())) // EOF
-                } else {
-                    // TODO: Register waker: cx.waker().wake_by_ref();
-                    // This requires the UtpSocket to notify when new data is available.
-                    Poll::Pending
-                }
-            }
+            },
+            Err(UtpError::Network(e)) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                // No data available yet
+                *this.read_waker.lock().unwrap() = Some(cx.waker().clone());
+                Poll::Pending
+            },
             Err(e) => Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e))),
-            // Ok(_) => Poll::Pending, // No data currently, should register waker
         }
     }
 }
@@ -132,64 +216,115 @@ impl AsyncWrite for UtpStream {
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
-        // 1. Call self.socket.tick()
-        // self.get_mut().socket.tick().map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let this = self.get_mut();
 
-        // 2. Try to write to UtpSocket's internal send buffer.
-        let socket = &mut self.get_mut().socket;
-        match socket.write_data(buf) {
+        // Try to write data
+        let result = {
+            let socket_guard = this.socket.lock().unwrap();
+            socket_guard.write_data(buf)
+        };
+
+        match result {
+            Ok(0) => {
+                // Socket buffer is full, register for notification
+                *this.write_waker.lock().unwrap() = Some(cx.waker().clone());
+                Poll::Pending
+            },
             Ok(n) => {
-                // The data is now in UtpSocket's send buffer.
-                // The tick() method (or a dispatcher) is responsible for packetizing and sending it.
-                // If the internal send buffer is full, write_data might return 0 or an error,
-                // or block (which is not ideal for poll_write).
-                // A real implementation would check if congestion window allows sending.
-                // If not, return Poll::Pending and register waker.
+                // Successfully wrote some data
                 Poll::Ready(Ok(n))
-            }
+            },
             Err(e) => Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e))),
         }
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        // 1. Call self.socket.tick() to ensure any buffered data is being processed for sending.
-        // self.get_mut().socket.tick().map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    fn poll_flush(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
 
-        // uTP doesn't have an explicit flush in the same way TCP does (where OS buffers are flushed).
-        // Here, "flush" means ensuring all data given to write_data() has been packetized
-        // and is either sent or in the outgoing queue, and ACKs are awaited.
-        // This might mean checking if UtpSocket's send_buffer is empty and bytes_in_flight is being managed.
-        // If UtpSocket's internal send_buffer is empty, consider it flushed.
-        // If not, Poll::Pending and register waker.
-        let internal_guard = self.get_mut().socket.internal.lock().unwrap();
-        if internal_guard.send_buffer.is_empty() { // And potentially check outgoing_packets too
+        // Check if the send buffer is empty
+        let send_buffer_empty = {
+            let socket_guard = this.socket.lock().unwrap();
+            let internal_guard = socket_guard.internal.lock().unwrap();
+            internal_guard.send_buffer.is_empty() && internal_guard.outgoing_packets.is_empty()
+        };
+
+        if send_buffer_empty {
+            // All data has been processed and sent
             Poll::Ready(Ok(()))
         } else {
-            // TODO: Register waker
+            // Still have data to send
+            *this.write_waker.lock().unwrap() = Some(cx.waker().clone());
             Poll::Pending
         }
     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        // This is for closing the write stream, typically by sending a FIN.
-        // 1. Call self.socket.close() if not already called.
-        let socket = &mut self.get_mut().socket;
-        socket.close().map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
 
-        // 2. Call self.socket.tick() to process sending the FIN and receiving its ACK.
-        // self.get_mut().socket.tick().map_err(|e| io::Error::new(io.ErrorKind::Other, e))?;
+        // Send FIN packet if needed
+        let state = {
+            let socket_guard = this.socket.lock().unwrap();
+            socket_guard.get_state()
+        };
 
-        // 3. Poll until the FIN is ACKed or connection closes.
-        // If state indicates FIN_ACKed or Closed/Reset, return Ready.
-        // Otherwise, Poll::Pending and register waker.
-        match socket.get_state() {
-            crate::utp::common::ConnectionState::Closed |
-            crate::utp::common::ConnectionState::Reset => Poll::Ready(Ok(())),
-            // crate::utp::common::ConnectionState::FinSentAcked => Poll::Ready(Ok(())), // If you have such a state
+        if !matches!(state, 
+            ConnectionState::FinSent | ConnectionState::Closed | ConnectionState::Reset) {
+            let result = {
+                let socket_guard = this.socket.lock().unwrap();
+                socket_guard.close()
+            };
+
+            if let Err(e) = result {
+                if !matches!(e, UtpError::InvalidState) {
+                    return Poll::Ready(Err(io::Error::new(io::ErrorKind::Other, e)));
+                }
+            }
+        }
+
+        // Check if connection is fully closed
+        let state = {
+            let socket_guard = this.socket.lock().unwrap();
+            socket_guard.get_state()
+        };
+
+        match state {
+            ConnectionState::Closed | ConnectionState::Reset => {
+                Poll::Ready(Ok(()))
+            },
             _ => {
-                // TODO: Register waker
+                *this.write_waker.lock().unwrap() = Some(cx.waker().clone());
                 Poll::Pending
             }
         }
+    }
+}
+
+impl Clone for UtpStream {
+    fn clone(&self) -> Self {
+        Self {
+            socket: Arc::clone(&self.socket),
+            read_waker: Arc::new(Mutex::new(None)),
+            write_waker: Arc::new(Mutex::new(None)),
+            running: Arc::clone(&self.running),
+        }
+    }
+}
+
+impl Drop for UtpStream {
+    fn drop(&mut self) {
+        // Signal background task to stop
+        *self.running.lock().unwrap() = false;
+
+        // Attempt to close the connection gracefully
+        let _ = {
+            let socket_guard = self.socket.lock().unwrap();
+            socket_guard.close()
+        };
     }
 }

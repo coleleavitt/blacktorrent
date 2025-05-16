@@ -1,0 +1,6 @@
+[submodule "libs/libtorrent"]
+	path = libs/libtorrent
+	url = https://github.com/arvidn/libtorrent.git
+[submodule "libs/libutp"]
+	path = libs/libutp
+	url = https://github.com/bittorrent/libutp.git
