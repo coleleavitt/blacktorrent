@@ -348,60 +348,91 @@ impl UtpSocket {
     pub fn tick(&self) -> Result<Option<Vec<u8>>, UtpError> {
         let mut i = self.internal.lock().unwrap();
 
+        // 1) Timestamps
         let now_us = current_micros();
         let now_ms = now_us / 1000;
 
+        // 2) Drain incoming queue
         while let Some(pkt) = i.incoming_packets.pop_front() {
             i.last_packet_recv_time = now_us;
             i.process_packet(&pkt, now_us);
         }
 
+        // 3) Periodic RTO check
         if now_ms.saturating_sub(i.last_timeout_check) >= MAX_TIMEOUT_CHECK_INTERVAL {
             i.last_timeout_check = now_ms;
             i.check_timeouts(now_ms);
         }
+
+        // 4) Immediate retransmit if RM flagged any seq
+        if let Some(seq_nr) = i.rm.check_timeouts(now_us) {
+            // First copy out all the data we need
+            let packet_info = i.conn.sent_packets.get(&seq_nr).map(|info| {
+                (info.packet_data.clone(), info.size_bytes)
+            });
+
+            // If we have valid packet info, update stats and return
+            if let Some((packet_data, size_bytes)) = packet_info {
+                i.cc.on_timeout();
+                i.stats.packets_lost += 1;
+                i.stats.packets_retransmitted += 1;
+                i.stats.bytes_retransmitted += size_bytes as u64;
+                return Ok(Some(packet_data));
+            }
+        }
+
+        // 5) Tear-down check
         if i.state == ConnectionState::Destroying {
             return Err(UtpError::ConnectionReset);
         }
 
+        // 6) Delayed-ACK?
         if i.rm.needs_ack_packet() {
-            let ack_packet = i.create_ack(false);
-            i.outgoing_packets.push_back(ack_packet);
+            let ack = i.create_ack(false);
+            i.outgoing_packets.push_back(ack);
             i.rm.ack_sent();
             i.stats.packets_sent += 1;
         }
 
+        // 7) Package any application data into DATA packets
         i.package_data_from_buffer();
 
-        if i.state == ConnectionState::Connected && !i.fin_sent &&
-            now_ms.saturating_sub(i.last_packet_sent_time / 1000) >= DEFAULT_KEEPALIVE_INTERVAL {
+        // 8) Keep-alive?
+        if i.state == ConnectionState::Connected
+            && !i.fin_sent
+            && now_ms.saturating_sub(i.last_packet_sent_time / 1000) >= DEFAULT_KEEPALIVE_INTERVAL
+        {
             i.send_keep_alive();
         }
 
-        if let Some(outgoing_pkt) = i.outgoing_packets.pop_front() {
+        // 9) Pop one packet to actually send
+        if let Some(pkt) = i.outgoing_packets.pop_front() {
             i.last_packet_sent_time = now_us;
-            let packet_type = outgoing_pkt.header.packet_type();
+            let ty = pkt.header.packet_type();
 
-            if packet_type == ST_DATA || packet_type == ST_SYN || packet_type == ST_FIN {
-                if packet_type != ST_SYN {
-                    let mut temp_sent_packets = mem::take(&mut i.conn.sent_packets);
-                    i.rm.on_packet_sent(&outgoing_pkt, now_us, &mut temp_sent_packets);
-                    i.conn.sent_packets = temp_sent_packets;
+            // Track data-bearing packets
+            if ty == ST_DATA || ty == ST_SYN || ty == ST_FIN {
+                if ty != ST_SYN {
+                    let mut tmp = std::mem::take(&mut i.conn.sent_packets);
+                    i.rm.on_packet_sent(&pkt, now_us, &mut tmp);
+                    i.conn.sent_packets = tmp;
                 }
             }
 
+            // Ensure RTO timer is set
             if !i.conn.sent_packets.is_empty() && i.rto_timeout_at_ms == 0 {
                 i.rto_timeout_at_ms = now_ms + (i.rm.get_current_rto() as u64 / 1000);
             }
 
+            // Serialize and return
             let mut buf = Vec::new();
-            outgoing_pkt.serialize(&mut buf);
+            pkt.serialize(&mut buf);
             return Ok(Some(buf));
         }
 
+        // 10) Nothing to send
         Ok(None)
-    }
-
+    }    
     pub fn write_data(&self, data: &[u8]) -> Result<usize, UtpError> {
         let mut i = self.internal.lock().unwrap();
         if i.state != ConnectionState::Connected && i.state != ConnectionState::ConnectedFull {
