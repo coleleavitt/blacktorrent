@@ -1,21 +1,10 @@
-warning: unused import: `current_micros`
- --> src/utp/congestion.rs:3:26
+warning: unused import: `MIN_RTO_MICROS`
+ --> src/utp/reliability.rs:4:46
   |
-3 | use crate::utp::common::{current_micros, DEFAULT_TARGET_DELAY_MICROS, MAX_CWND_INCREASE_BYTES_PER_RTT, MIN_WINDOW_SIZE_BYTES, DEFAULT_MAX...
-  |                          ^^^^^^^^^^^^^^
+4 | use crate::utp::common::{INITIAL_RTO_MICROS, MIN_RTO_MICROS, MAX_RTO_MICROS, ST_SYN, seq_eq_or_greater_than};
+  |                                              ^^^^^^^^^^^^^^
   |
   = note: `#[warn(unused_imports)]` on by default
-
-warning: unexpected `cfg` condition value: `logging`
-   --> src/utp/socket_manager.rs:306:11
-    |
-306 |     #[cfg(feature = "logging")]
-    |           ^^^^^^^^^^^^^^^^^^^ help: remove the condition
-    |
-    = note: no expected values for `feature`
-    = help: consider adding `logging` as a feature in `Cargo.toml`
-    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
-    = note: `#[warn(unexpected_cfgs)]` on by default
 
 warning: unused import: `socket::UtpSocket`
   --> src/utp/mod.rs:17:9
@@ -78,43 +67,18 @@ warning: variable does not need to be mutable
     |             help: remove this `mut`
 
 warning: unused variable: `rm`
-   --> src/utp/connection.rs:119:65
-    |
-119 |     pub fn create_syn_packet(&mut self, cc: &CongestionControl, rm: &ReliabilityManager) -> UtpPacket {
-    |                                                                 ^^ help: if this is intentional, prefix it with an underscore: `_rm`
-    |
-    = note: `#[warn(unused_variables)]` on by default
+  --> src/utp/connection.rs:97:9
+   |
+97 |         rm: &ReliabilityManager,
+   |         ^^ help: if this is intentional, prefix it with an underscore: `_rm`
+   |
+   = note: `#[warn(unused_variables)]` on by default
 
-warning: unreachable pattern
-   --> src/utp/connection.rs:243:13
+warning: unused variable: `timestamp_micros`
+   --> src/utp/congestion.rs:160:9
     |
-243 |             _ => { /* Unknown packet type */ }
-    |             ^ no value can reach this
-    |
-note: multiple earlier patterns match some of the same values
-   --> src/utp/connection.rs:243:13
-    |
-191 |             ST_SYN => { // Should be handled by a listener to create a new connection typically
-    |             ------ matches some of the same values
-...
-209 |             ST_STATE => { // ACK packet
-    |             -------- matches some of the same values
-...
-213 |             ST_DATA => {
-    |             ------- matches some of the same values
-...
-230 |             ST_FIN => {
-    |             ------ matches some of the same values
-...
-243 |             _ => { /* Unknown packet type */ }
-    |             ^ ...and 1 other patterns collectively make this unreachable
-    = note: `#[warn(unreachable_patterns)]` on by default
-
-warning: unused variable: `ST_RESET`
-   --> src/utp/connection.rs:239:13
-    |
-239 |             ST_RESET => {
-    |             ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_ST_RESET`
+160 |         timestamp_micros: u32,
+    |         ^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_timestamp_micros`
 
 warning: variable does not need to be mutable
    --> src/utp/stream.rs:136:21
@@ -130,24 +94,18 @@ warning: unused variable: `data`
 46 |     pub fn verify_piece(piece_index: usize, data: &[u8]) -> bool {
    |                                             ^^^^ help: if this is intentional, prefix it with an underscore: `_data`
 
-warning: constant `ST_RESET` is never used
-  --> src/utp/common.rs:13:11
-   |
-13 | pub const ST_RESET: u8 = 3;  // Connection reset packet
-   |           ^^^^^^^^
-   |
-   = note: `#[warn(dead_code)]` on by default
-
 warning: constant `ST_NUM_STATES` is never used
   --> src/utp/common.rs:15:11
    |
 15 | pub const ST_NUM_STATES: u8 = 5; // Total number of packet types
    |           ^^^^^^^^^^^^^
-
-warning: constant `MAX_RTO_MICROS` is never used
-  --> src/utp/common.rs:23:11
    |
-23 | pub const MAX_RTO_MICROS: u32 = 60_000_000; // Maximum RTO 60 seconds
+   = note: `#[warn(dead_code)]` on by default
+
+warning: constant `MIN_RTO_MICROS` is never used
+  --> src/utp/common.rs:22:11
+   |
+22 | pub const MIN_RTO_MICROS: u32 = 500_000; // Minimum RTO 500ms
    |           ^^^^^^^^^^^^^^
 
 warning: constant `UDP_IPV4_OVERHEAD` is never used
@@ -320,12 +278,6 @@ warning: associated items `now`, `wrapping_sub`, and `as_millis` are never used
 146 |     pub fn as_millis(&self) -> u64 {
     |            ^^^^^^^^^
 
-warning: function `clamp` is never used
-   --> src/utp/common.rs:173:8
-    |
-173 | pub fn clamp<T: PartialOrd>(val: T, min: T, max: T) -> T {
-    |        ^^^^^
-
 warning: function `current_millis` is never used
    --> src/utp/common.rs:192:8
     |
@@ -344,35 +296,14 @@ warning: function `random_u32` is never used
 202 | pub fn random_u32() -> u32 {
     |        ^^^^^^^^^^
 
-warning: multiple fields are never read
-   --> src/utp/common.rs:209:9
+warning: field `duplicate_acks_received` is never read
+   --> src/utp/common.rs:216:9
     |
 208 | pub struct UtpSocketStats {
-    |            -------------- fields in this struct
-209 |     pub packets_received: u64,
-    |         ^^^^^^^^^^^^^^^^
-210 |     pub bytes_received: u64,
-    |         ^^^^^^^^^^^^^^
-211 |     pub packets_sent: u64,
-    |         ^^^^^^^^^^^^
-212 |     pub bytes_sent: u64,
-    |         ^^^^^^^^^^
-213 |     pub packets_lost: u64,
-    |         ^^^^^^^^^^^^
-214 |     pub packets_retransmitted: u64,
-    |         ^^^^^^^^^^^^^^^^^^^^^
-215 |     pub bytes_retransmitted: u64,
-    |         ^^^^^^^^^^^^^^^^^^^
+    |            -------------- field in this struct
+...
 216 |     pub duplicate_acks_received: u64,
     |         ^^^^^^^^^^^^^^^^^^^^^^^
-217 |     pub rtt_samples: u64,
-    |         ^^^^^^^^^^^
-218 |     pub min_rtt: u32,
-    |         ^^^^^^^
-219 |     pub max_rtt: u32,
-    |         ^^^^^^^
-220 |     pub sum_rtt: u64,
-    |         ^^^^^^^
     |
     = note: `UtpSocketStats` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
 
@@ -391,18 +322,6 @@ warning: struct `SackExtensionHeader` is never constructed
 26 | pub struct SackExtensionHeader {
    |            ^^^^^^^^^^^^^^^^^^^
 
-warning: methods `timestamp_micros` and `timestamp_diff_micros` are never used
-  --> src/utp/packet.rs:66:12
-   |
-31 | impl UtpHeader {
-   | -------------- methods in this implementation
-...
-66 |     pub fn timestamp_micros(&self) -> u32 {
-   |            ^^^^^^^^^^^^^^^^
-...
-70 |     pub fn timestamp_diff_micros(&self) -> u32 {
-   |            ^^^^^^^^^^^^^^^^^^^^^
-
 warning: field `remote_addr` is never read
    --> src/utp/packet.rs:141:9
     |
@@ -415,97 +334,132 @@ warning: field `remote_addr` is never read
     = note: `UtpPacket` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
 
 warning: field `local_addr` is never read
-  --> src/utp/socket.rs:25:16
+  --> src/utp/socket.rs:33:16
    |
-24 | pub struct UtpSocketInternal {
+32 | pub struct UtpSocketInternal {
    |            ----------------- field in this struct
-25 |     pub(crate) local_addr: SocketAddr,
+33 |     pub(crate) local_addr: SocketAddr,
    |                ^^^^^^^^^^
 
-warning: methods `connect`, `get_rtt`, `get_mtu`, and `is_send_buffer_empty` are never used
-   --> src/utp/socket.rs:169:12
+warning: methods `connect`, `get_rtt`, `get_mtu`, `is_send_buffer_empty`, and `get_stats` are never used
+   --> src/utp/socket.rs:289:12
     |
-141 | impl UtpSocket {
+258 | impl UtpSocket {
     | -------------- methods in this implementation
 ...
-169 |     pub fn connect(&self) -> Result<(), UtpError> {
+289 |     pub fn connect(&self) -> Result<(), UtpError> {
     |            ^^^^^^^
 ...
-324 |     pub fn get_rtt(&self) -> u32 {
+479 |     pub fn get_rtt(&self) -> u32 {
     |            ^^^^^^^
 ...
-328 |     pub fn get_mtu(&self) -> usize {
+484 |     pub fn get_mtu(&self) -> usize {
     |            ^^^^^^^
 ...
-332 |     pub fn is_send_buffer_empty(&self) -> bool {
+489 |     pub fn is_send_buffer_empty(&self) -> bool {
     |            ^^^^^^^^^^^^^^^^^^^^
+...
+499 |     pub fn get_stats(&self) -> UtpSocketStats {
+    |            ^^^^^^^^^
 
-warning: associated items `new_for_listener`, `initiate_connection`, `get_seq_nr`, `get_ack_nr`, and `get_sent_packets` are never used
-   --> src/utp/connection.rs:54:12
+warning: associated items `new_for_listener`, `initiate_connection`, `get_seq_nr`, `get_ack_nr`, `get_sent_packets`, and `get_timestamp_values` are never used
+   --> src/utp/connection.rs:68:12
     |
-31  | impl Connection {
+45  | impl Connection {
     | --------------- associated items in this implementation
 ...
-54  |     pub fn new_for_listener(remote_addr: SocketAddr, syn_packet: &UtpPacket) -> Self {
+68  |     pub fn new_for_listener(remote_addr: SocketAddr, syn_packet: &UtpPacket) -> Self {
     |            ^^^^^^^^^^^^^^^^
 ...
-69  |     pub fn initiate_connection(&mut self) {
+86  |     pub fn initiate_connection(&mut self) {
     |            ^^^^^^^^^^^^^^^^^^^
 ...
-249 |     pub fn get_seq_nr(&self) -> u16 { self.seq_nr }
+297 |     pub fn get_seq_nr(&self) -> u16 { self.seq_nr }
     |            ^^^^^^^^^^
-250 |     pub fn get_ack_nr(&self) -> u16 { self.ack_nr }
+298 |     pub fn get_ack_nr(&self) -> u16 { self.ack_nr }
     |            ^^^^^^^^^^
-251 |     pub fn get_sent_packets(&self) -> &std::collections::HashMap<u16, SentPacketInfo> {
+299 |     pub fn get_sent_packets(&self) -> &HashMap<u16, SentPacketInfo> {
     |            ^^^^^^^^^^^^^^^^
-
-warning: field `base_delay_micros` is never read
-  --> src/utp/congestion.rs:17:5
-   |
-8  | pub struct CongestionControl {
-   |            ----------------- field in this struct
 ...
-17 |     base_delay_micros: Option<u32>, // Minimum observed one-way delay (or RTT component)
-   |     ^^^^^^^^^^^^^^^^^
+304 |     pub fn get_timestamp_values(&self) -> (u32, u64) {
+    |            ^^^^^^^^^^^^^^^^^^^^
 
-warning: method `can_send` is never used
-  --> src/utp/congestion.rs:46:12
-   |
-22 | impl CongestionControl {
-   | ---------------------- method in this implementation
+warning: multiple methods are never used
+   --> src/utp/congestion.rs:130:12
+    |
+73  | impl CongestionControl {
+    | ---------------------- methods in this implementation
 ...
-46 |     pub fn can_send(&self, packet_size: usize) -> bool {
-   |            ^^^^^^^^
+130 |     pub fn can_send(&self, packet_size: usize) -> bool {
+    |            ^^^^^^^^
+...
+323 |     pub fn on_congestion_event(&mut self) {
+    |            ^^^^^^^^^^^^^^^^^^^
+...
+334 |     pub fn reset(&mut self) {
+    |            ^^^^^
+...
+351 |     pub fn set_target_delay(&mut self, target_micros: u32) {
+    |            ^^^^^^^^^^^^^^^^
+...
+356 |     pub fn set_receive_window(&mut self, window_bytes: usize) {
+    |            ^^^^^^^^^^^^^^^^^^
+...
+361 |     pub fn get_base_delay_micros(&self) -> u32 {
+    |            ^^^^^^^^^^^^^^^^^^^^^
+...
+366 |     pub fn get_current_queuing_delay(&self) -> u32 {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+376 |     pub fn is_in_slow_start(&self) -> bool {
+    |            ^^^^^^^^^^^^^^^^
+...
+381 |     pub fn get_slow_start_threshold(&self) -> usize {
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^
 
-warning: fields `seq_nr`, `packet_data`, and `is_syn` are never read
-  --> src/utp/reliability.rs:13:9
+warning: fields `seq_nr` and `is_syn` are never read
+  --> src/utp/reliability.rs:26:9
    |
-12 | pub struct SentPacketInfo {
+24 | pub struct SentPacketInfo {
    |            -------------- fields in this struct
-13 |     pub seq_nr: u16,
+25 |     /// Sequence number of the sent packet
+26 |     pub seq_nr: u16,
    |         ^^^^^^
 ...
-17 |     pub packet_data: Vec<u8>,
-   |         ^^^^^^^^^^^
-18 |     pub is_syn: bool,
+36 |     pub is_syn: bool,
    |         ^^^^^^
    |
    = note: `SentPacketInfo` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
 
-warning: methods `set_needs_ack`, `needs_ack_packet`, and `ack_sent` are never used
-   --> src/utp/reliability.rs:196:12
+warning: multiple methods are never used
+   --> src/utp/reliability.rs:135:8
     |
-41  | impl ReliabilityManager {
+108 | impl ReliabilityManager {
     | ----------------------- methods in this implementation
 ...
-196 |     pub fn set_needs_ack(&mut self) {
+135 |     fn get_cumulative_ack_nr(&self) -> u16 {
+    |        ^^^^^^^^^^^^^^^^^^^^^
+...
+322 |     pub fn set_needs_retransmit(&mut self, seq_nr: u16) {
+    |            ^^^^^^^^^^^^^^^^^^^^
+...
+393 |     pub fn set_needs_ack(&mut self) {
     |            ^^^^^^^^^^^^^
 ...
-200 |     pub fn needs_ack_packet(&self) -> bool {
+398 |     pub fn needs_ack_packet(&self) -> bool {
     |            ^^^^^^^^^^^^^^^^
 ...
-204 |     pub fn ack_sent(&mut self) {
+403 |     pub fn ack_sent(&mut self) {
     |            ^^^^^^^^
+...
+408 |     pub fn clear_ooo_packets(&mut self) {
+    |            ^^^^^^^^^^^^^^^^^
+...
+413 |     pub fn verify_state_integrity(&self) -> bool {
+    |            ^^^^^^^^^^^^^^^^^^^^^^
+...
+429 |     pub fn repair_tmr(&mut self) {
+    |            ^^^^^^^^^^
 
 warning: constant `CONNECT_TIMEOUT_SECS` is never used
   --> src/utp/stream.rs:15:7
@@ -555,13 +509,5 @@ warning: function `verify_piece` is never used
 46 |     pub fn verify_piece(piece_index: usize, data: &[u8]) -> bool {
    |            ^^^^^^^^^^^^
 
-warning: variable `ST_RESET` should have a snake case name
-   --> src/utp/connection.rs:239:13
-    |
-239 |             ST_RESET => {
-    |             ^^^^^^^^ help: convert the identifier to snake case: `st_reset`
-    |
-    = note: `#[warn(non_snake_case)]` on by default
-
-warning: `blacktorrent` (bin "blacktorrent") generated 62 warnings (run `cargo fix --bin "blacktorrent"` to apply 10 suggestions)
+warning: `blacktorrent` (bin "blacktorrent") generated 55 warnings (run `cargo fix --bin "blacktorrent"` to apply 10 suggestions)
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s

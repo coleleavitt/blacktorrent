@@ -1,7 +1,7 @@
 // utp/socket.rs
 #![forbid(unsafe_code)]
 
-use crate::utp::common::{ConnectionState, UtpError, current_micros, UtpSocketStats};
+use crate::utp::common::{ConnectionState, UtpError, current_micros, UtpSocketStats, ST_SYN, ST_DATA, ST_STATE, ST_FIN};
 use crate::utp::packet::{UtpPacket, BASE_HEADER_SIZE};
 use crate::utp::connection::Connection;
 use crate::utp::congestion::CongestionControl;
@@ -10,7 +10,7 @@ use crate::utp::reliability::ReliabilityManager;
 use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use std::cmp::min;
+use std::cmp::{max, min};
 
 /// Default interval for sending keepalive packets (in milliseconds)
 const DEFAULT_KEEPALIVE_INTERVAL: u64 = 29_000;
@@ -105,9 +105,32 @@ impl UtpSocketInternal {
                 self.cc.on_timeout();
                 self.stats.packets_lost += 1;
 
-                // Set next RTO
+                // Retransmit the timed-out packet, if found in sent_packets
+                if let Some(packet_info) = self.conn.sent_packets.get(&timed_out_seq).cloned() {
+                    if packet_info.transmissions < MAX_RETRANSMISSIONS {
+                        // Create packet from stored data
+                        if let Ok(pkt) = UtpPacket::from_bytes(&packet_info.packet_data, self.remote_addr) {
+                            self.outgoing_packets.push_back(pkt);
+                            self.stats.packets_retransmitted += 1;
+                            self.stats.bytes_retransmitted += packet_info.size_bytes as u64;
+
+                            // Update transmission count in sent_packets
+                            if let Some(info) = self.conn.sent_packets.get_mut(&timed_out_seq) {
+                                info.transmissions += 1;
+                                info.need_resend = false;
+                                // Update sent_at_micros to track RTT correctly for retransmitted packets
+                                info.sent_at_micros = current_micros();
+                            }
+                        }
+                    } else {
+                        // Too many retransmissions, reset connection
+                        self.state = ConnectionState::Reset;
+                    }
+                }
+
+                // Set next RTO - use current_ts_micros/1000 instead of now_ms to avoid timing issues
                 let rto = self.rm.get_current_rto() as u64;
-                self.rto_timeout = now_ms + rto;
+                self.rto_timeout = current_micros() / 1_000 + rto;
             }
         }
 
@@ -169,6 +192,66 @@ impl UtpSocketInternal {
     fn send_keep_alive(&mut self) {
         let ka = self.create_ack(false);
         self.outgoing_packets.push_back(ka);
+    }
+
+    /// Process incoming packet
+    fn process_packet(&mut self, pkt: &UtpPacket, now_us: u64) {
+        // Special handling for SYN-ACKs during connection establishment
+        if self.state == ConnectionState::SynSent &&
+            pkt.header.packet_type() == ST_STATE {
+            // The responder must use recv_id for connection ID in SYN-ACK per uTP spec
+            if pkt.header.connection_id() == self.conn.recv_id {
+                // Verify this is a valid SYN-ACK - must acknowledge our SYN
+                if pkt.header.ack_nr() == self.conn.seq_nr.wrapping_sub(1) {
+                    // Update our ack_nr to peer's seq_nr
+                    self.conn.ack_nr = pkt.header.seq_nr();
+
+                    // Move to connected state
+                    self.state = ConnectionState::Connected;
+
+                    // Update RTT stats
+                    let rtt_sample = (now_us - self.created_time) as u32;
+                    self.stats.rtt_samples += 1;
+                    self.stats.min_rtt = if self.stats.min_rtt == 0 { rtt_sample } else { min(self.stats.min_rtt, rtt_sample) };
+                    self.stats.max_rtt = max(self.stats.max_rtt, rtt_sample);
+                    self.stats.sum_rtt += rtt_sample as u64;
+
+                    // Need to send ACK for the SYN-ACK
+                    self.needs_ack = true;
+
+                    return;
+                }
+            } else {
+                // Log the mismatch for debugging
+                println!("uTP: Received packet with mismatched connection ID. Expected {}, got {}",
+                         self.conn.recv_id, pkt.header.connection_id());
+            }
+        }
+
+        // Regular packet processing
+        self.conn.handle_incoming_packet(
+            &pkt,
+            &mut self.cc,
+            &mut self.rm,
+            &mut self.recv_buffer,
+            &mut self.state,
+            now_us
+        );
+
+        // Always set needs_ack to true when receiving a packet
+        self.needs_ack = true;
+
+        // Update peer window size from packet
+        self.conn.peer_wnd_size = pkt.header.wnd_size();
+
+        // Check for state transitions
+        if pkt.header.packet_type() == ST_FIN {
+            self.fin_received = true;
+            if self.fin_sent {
+                // Both sides have sent FIN, move to closed
+                self.state = ConnectionState::Closed;
+            }
+        }
     }
 }
 
@@ -250,18 +333,8 @@ impl UtpSocket {
         while let Some(pkt) = i.incoming_packets.pop_front() {
             i.last_packet_recv_time = now_us;
 
-            // Get all mutable references we need
-            let UtpSocketInternal {
-                conn,
-                cc,
-                rm,
-                recv_buffer,
-                state,
-                ..
-            } = &mut *i;
-
-            conn.handle_incoming_packet(&pkt, cc, rm, recv_buffer, state, now_us);
-            i.needs_ack = true;
+            // Process the packet
+            i.process_packet(&pkt, now_us);
         }
 
         // Check timeouts periodically
@@ -291,19 +364,20 @@ impl UtpSocket {
         }
 
         // Emit packet if any
-        if let Some(pkt) = i.outgoing_packets.pop_front() {
+        if let Some(outgoing_pkt) = i.outgoing_packets.pop_front() {
             i.last_packet_sent_time = now_us;
-            let ty = pkt.header.packet_type();
+            let ty = outgoing_pkt.header.packet_type();
 
             // Track data packets for retransmission
-            let UtpSocketInternal { rm, conn, .. } = &mut *i;
-            if ty == crate::utp::common::ST_DATA || ty == crate::utp::common::ST_SYN {
-                rm.on_packet_sent(&pkt, now_us, &mut conn.sent_packets);
+            if ty == ST_DATA || ty == ST_SYN {
+                // Use destructuring pattern to get mutable references to fields
+                let UtpSocketInternal { rm, conn, .. } = &mut *i;
+                rm.on_packet_sent(&outgoing_pkt, now_us, &mut conn.sent_packets);
             }
 
             // Serialize packet for transmission
             let mut buf = Vec::new();
-            pkt.serialize(&mut buf);
+            outgoing_pkt.serialize(&mut buf);
             return Ok(Some(buf));
         }
 
@@ -520,8 +594,8 @@ mod tests {
 
         // Simulate receiving data
         let recv_id = socket.connection_id();
-        let remote_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 5678);
-        let data_packet = create_packet(crate::utp::common::ST_DATA, recv_id, 1, 0, b"Received data");
+        let remote_addr = socket.remote_address();
+        let data_packet = create_packet(ST_DATA, recv_id, 1, 0, b"Received data");
         socket.process_incoming_datagram(&serialize_packet(&data_packet), remote_addr);
 
         // Process incoming packet
@@ -540,18 +614,27 @@ mod tests {
 
         // Initiate connection
         socket.connect().unwrap();
-        socket.tick().unwrap();
 
-        // Simulate SYN-ACK from peer
-        let recv_id = socket.connection_id();
-        let remote_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 5678);
-        let synack = create_packet(crate::utp::common::ST_STATE, recv_id.wrapping_sub(1), 1, 0, &[]);
+        // Extract SYN packet
+        let _ = socket.tick().unwrap();
+
+        // Get initial sequence number and connection IDs
+        let (_, recv_id) = {
+            let internal = socket.internal.lock().unwrap();
+            (internal.conn.send_id, internal.conn.recv_id)
+        };
+        let initial_seq_nr = recv_id.wrapping_sub(1); // SYN consumes a seq nr
+
+        // Create SYN-ACK using RECV_ID for connection ID (not send_id)
+        // This matches how uTP protocol works - the responder uses the initiator's recv_id
+        let remote_addr = socket.remote_address();
+        let synack = create_packet(ST_STATE, recv_id, 1, initial_seq_nr, &[]);
         socket.process_incoming_datagram(&serialize_packet(&synack), remote_addr);
 
         // Process the SYN-ACK
         socket.tick().unwrap();
 
-        // Should be connected
+        // Should be connected now
         assert_eq!(socket.get_state(), ConnectionState::Connected);
     }
 
@@ -570,5 +653,89 @@ mod tests {
             assert_eq!(socket.connection_id(), conn_id);
             assert_eq!(socket.get_state(), ConnectionState::Connected);
         });
+    }
+
+    #[test]
+    fn test_packet_retransmission() {
+        let socket = create_test_socket();
+        let current_time = current_micros();
+
+        // Set up connected state and prepare for retransmission test
+        {
+            let mut internal = socket.internal.lock().unwrap();
+            internal.state = ConnectionState::Connected;
+
+            // Set retransmission timeout to a value in the past to trigger immediately
+            internal.rto_timeout = (current_time / 1000).saturating_sub(1);
+
+            // Mock a sent but unacked packet
+            let test_packet = create_packet(ST_DATA, internal.conn.send_id, 1, 0, b"Test data");
+            let mut packet_data = Vec::new();
+            test_packet.serialize(&mut packet_data);
+
+            // Create SentPacketInfo with need_resend=true to ensure it gets retransmitted
+            let packet_info = crate::utp::reliability::SentPacketInfo::new(
+                1,                                      // seq_nr
+                current_time.saturating_sub(1_000_000), // sent_at_micros (1 second ago)
+                packet_data.len(),                      // size_bytes
+                1,                                      // transmissions
+                packet_data,                            // packet_data
+                false,                                  // is_syn
+                true                                    // need_resend - IMPORTANT: marked for retransmission
+            );
+
+            internal.conn.sent_packets.insert(1, packet_info);
+
+            // Ensure the reliability manager will pick this packet for retransmission
+            internal.rm.set_needs_retransmit(1);
+
+            // Ensure timeout value is set properly
+            internal.last_timeout_check = 0; // Force timeout check immediately
+        }
+
+        // Run multiple ticks to ensure processing
+        for _ in 0..3 {
+            let _ = socket.tick().unwrap();
+        }
+
+        // Check stats after multiple ticks
+        let stats = socket.get_stats();
+        assert!(stats.packets_retransmitted > 0, "Packet was not retransmitted");
+    }
+
+    #[test]
+    fn test_connection_close() {
+        let socket = create_test_socket();
+
+        // Set connected state
+        {
+            let mut internal = socket.internal.lock().unwrap();
+            internal.state = ConnectionState::Connected;
+        }
+
+        // Close the connection
+        socket.close().unwrap();
+
+        // Should be in FIN_SENT state
+        assert_eq!(socket.get_state(), ConnectionState::FinSent);
+
+        // Should have a FIN packet queued
+        let fin_data = socket.tick().unwrap();
+        assert!(fin_data.is_some());
+
+        // Simulate receiving FIN-ACK
+        let remote_addr = socket.remote_address();
+        let send_id = {
+            let internal = socket.internal.lock().unwrap();
+            internal.conn.send_id
+        };
+        let fin_ack = create_packet(ST_FIN, send_id, 1, 0, &[]);
+        socket.process_incoming_datagram(&serialize_packet(&fin_ack), remote_addr);
+
+        // Process the FIN-ACK
+        socket.tick().unwrap();
+
+        // Should be in Closed state
+        assert_eq!(socket.get_state(), ConnectionState::Closed);
     }
 }
