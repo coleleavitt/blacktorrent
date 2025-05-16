@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::{Mutex, mpsc, oneshot};
 use tokio::time::{timeout, Duration};
@@ -18,7 +19,7 @@ const MAX_PENDING_CONNECTIONS: usize = 16;
 const TMR_SIZE: usize = 3;
 
 pub struct UtpSocketManager {
-    dispatcher: Mutex<UtpDispatcher>,
+    dispatcher: Arc<Mutex<UtpDispatcher>>,
     command_tx: mpsc::Sender<DispatcherCommand>,
     local_addr: [SocketAddr; TMR_SIZE], // Triple redundancy for SEU protection
     active: AtomicBool,
@@ -26,6 +27,7 @@ pub struct UtpSocketManager {
 
 impl UtpSocketManager {
     pub async fn new(bind_addr: SocketAddr) -> Result<Self, UtpError> {
+        // Create dispatcher instance
         let dispatcher = match timeout(
             Duration::from_millis(OPERATION_TIMEOUT_MS),
             UtpDispatcher::new(bind_addr)
@@ -36,27 +38,29 @@ impl UtpSocketManager {
 
         let command_tx = dispatcher.get_command_sender();
 
+        // Wrap dispatcher in Arc<Mutex>
+        let dispatcher = Arc::new(Mutex::new(dispatcher));
+        let dispatcher_for_task = dispatcher.clone();
+
+        // Spawn the dispatcher task
+        tokio::spawn(async move {
+            let mut dispatcher = dispatcher_for_task.lock().await;
+            dispatcher.run().await;
+        });
+
+        // Create the manager instance
         let manager = Self {
-            dispatcher: Mutex::new(dispatcher),
+            dispatcher,
             command_tx: command_tx.clone(),
-            local_addr: [bind_addr, bind_addr, bind_addr], // Triple redundancy
+            local_addr: [bind_addr, bind_addr, bind_addr],
             active: AtomicBool::new(true),
         };
 
-        let bind_addr_clone = bind_addr;
-        let task_command_tx = command_tx;
-
+        // Spawn heartbeat task
+        let heartbeat_tx = command_tx;
         tokio::spawn(async move {
-            match UtpDispatcher::new(bind_addr_clone).await {
-                Ok(mut task_dispatcher) => {
-                    task_dispatcher.run().await;
-                },
-                Err(e) => {
-                    eprintln!("CRITICAL ERROR: Failed to create task dispatcher: {:?}", e);
-                }
-            }
             loop {
-                if task_command_tx.send(DispatcherCommand::Heartbeat).await.is_err() {
+                if heartbeat_tx.send(DispatcherCommand::Heartbeat).await.is_err() {
                     break;
                 }
                 tokio::time::sleep(Duration::from_secs(1)).await;
