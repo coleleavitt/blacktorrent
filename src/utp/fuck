@@ -6,6 +6,17 @@ warning: unused import: `MIN_RTO_MICROS`
   |
   = note: `#[warn(unused_imports)]` on by default
 
+warning: unexpected `cfg` condition value: `logging`
+   --> src/utp/socket_manager.rs:306:11
+    |
+306 |     #[cfg(feature = "logging")]
+    |           ^^^^^^^^^^^^^^^^^^^ help: remove the condition
+    |
+    = note: no expected values for `feature`
+    = help: consider adding `logging` as a feature in `Cargo.toml`
+    = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+    = note: `#[warn(unexpected_cfgs)]` on by default
+
 warning: unused import: `socket::UtpSocket`
   --> src/utp/mod.rs:17:9
    |
@@ -41,30 +52,6 @@ warning: variable does not need to be mutable
     |                         ----^^^^^^^^^^^^
     |                         |
     |                         help: remove this `mut`
-
-warning: variable does not need to be mutable
-   --> src/utp/dispatcher.rs:189:33
-    |
-189 | ...                   let mut socket_guard = socket.lock().await;
-    |                           ----^^^^^^^^^^^^
-    |                           |
-    |                           help: remove this `mut`
-
-warning: variable does not need to be mutable
-   --> src/utp/dispatcher.rs:231:13
-    |
-231 |         let mut socket = UtpSocket::new(local_addr, addr);
-    |             ----^^^^^^
-    |             |
-    |             help: remove this `mut`
-
-warning: variable does not need to be mutable
-   --> src/utp/dispatcher.rs:287:13
-    |
-287 |         let mut socket_guard = socket.lock().await;
-    |             ----^^^^^^^^^^^^
-    |             |
-    |             help: remove this `mut`
 
 warning: unused variable: `rm`
   --> src/utp/connection.rs:97:9
@@ -333,6 +320,33 @@ warning: field `remote_addr` is never read
     |
     = note: `UtpPacket` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
 
+warning: multiple associated items are never used
+   --> src/utp/packet.rs:215:12
+    |
+144 | impl UtpPacket {
+    | -------------- associated items in this implementation
+...
+215 |     pub fn total_size(&self) -> usize {
+    |            ^^^^^^^^^^
+...
+225 |     pub fn new(
+    |            ^^^
+...
+259 |     pub fn create_syn(
+    |            ^^^^^^^^^^
+...
+281 |     pub fn create_data(
+    |            ^^^^^^^^^^^
+...
+307 |     pub fn create_ack(
+    |            ^^^^^^^^^^
+...
+332 |     pub fn create_fin(
+    |            ^^^^^^^^^^
+...
+356 |     pub fn create_reset(
+    |            ^^^^^^^^^^^^
+
 warning: field `local_addr` is never read
   --> src/utp/socket.rs:33:16
    |
@@ -509,5 +523,5 @@ warning: function `verify_piece` is never used
 46 |     pub fn verify_piece(piece_index: usize, data: &[u8]) -> bool {
    |            ^^^^^^^^^^^^
 
-warning: `blacktorrent` (bin "blacktorrent") generated 55 warnings (run `cargo fix --bin "blacktorrent"` to apply 10 suggestions)
+warning: `blacktorrent` (bin "blacktorrent") generated 54 warnings (run `cargo fix --bin "blacktorrent"` to apply 7 suggestions)
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
