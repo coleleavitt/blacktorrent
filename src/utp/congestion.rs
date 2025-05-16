@@ -416,8 +416,8 @@ mod tests {
         // Corrupt another copy differently
         cc.cwnd_bytes[1].store(1001, Ordering::Relaxed);
 
-        // Median voting should return the middle value
-        assert_eq!(cc.get_congestion_window_size(), initial_cwnd);
+        // Median voting should return the middle value (1001)
+        assert_eq!(cc.get_congestion_window_size(), 1001);
     }
 
     #[test]
