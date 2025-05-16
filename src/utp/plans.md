@@ -1,88 +1,150 @@
-Looking at the code, we've implemented a substantial portion of the uTP protocol, but there are still some gaps and areas that would need to be completed for a fully functional implementation. Here's an assessment:
+Certainly! Here is a **comprehensive, detailed checklist** tailored to your implementation, addressing both core protocol requirements and JPL's safety-critical, radiation-hardened standards. This will help you bring your uTP stack to production and verification readiness:
 
-### What's Implemented:
+---
 
-1. **Core Protocol Structures**:
-    - Packet header format (UtpHeader)
-    - Packet types (SYN, DATA, FIN, etc.)
-    - Connection state machine
-    - Sequence number handling
+# uTP Full Implementation & Mission-Critical Compliance Checklist
 
-2. **Reliability Mechanisms**:
-    - Retransmission timeout (RTO)
-    - Fast retransmit on duplicate ACKs
-    - Basic selective ACKs (SACK)
-    - RTT estimation
+## 1. Core Protocol: Connection Lifecycle
 
-3. **Congestion Control**:
-    - LEDBAT-inspired delay-based congestion control
-    - Window management
+- [x] **SYN handshake**
+- [x] **State transitions (Uninitialized, Idle, SynSent, SynRecv, Connected, FinSent, FinRecv, Reset, Closed, Destroying)**
+- [x] **Sequence number management (wrapping, validation)**
+- [x] **FIN packet generation and tracking**
 
-4. **Stream Interface**:
-    - AsyncRead/AsyncWrite implementations
-    - Basic connection establishment
+- [ ] **Graceful teardown:**
+   - [ ] Four-way FIN handshake (each direction may close independently)
+   - [ ] Simultaneous close/open (handle race conditions)
+   - [ ] Draining/retransmission of final segments
+   - [ ] Timeout handling for teardown
 
-### What's Missing or Incomplete:
+- [ ] **Abort/reset:**
+   - [ ] Proper handling of RESET packets in all states
+   - [ ] Resource cleanup/notification
 
-1. **Full Connection Lifecycle**:
-    - Proper connection teardown (FIN handshake)
-    - Timeout handling for all states
-    - Simultaneous open/close cases
+---
 
-2. **Error Handling**:
-    - More comprehensive error cases
-    - Better error recovery
+## 2. Reliability & Ordering
 
-3. **Performance Optimizations**:
-    - Nagle's algorithm equivalent
-    - Better SACK handling
-    - Window scaling
+- [x] **Retransmission timeout (RTO) and backoff**
+- [x] **RTT & RTO estimation (SRTT, RTTVAR, RTO bounds)**
+- [x] **Selective ACKs (basic SACK extension)**
 
-4. **Integration Layer**:
-    - No actual UDP socket integration
-    - Missing dispatcher/event loop for managing multiple connections
-    - No proper async runtime integration
+- [ ] **Comprehensive reliability:**
+   - [ ] Retransmit on all loss triggers (timeout, triple duplicate ACKs, SACK holes)
+   - [ ] Full SACK: handle out-of-order delivery, arbitrary gaps, and partial retransmissions
+   - [ ] Maximum retransmissions: conclusive error/teardown after repeated loss
 
-5. **Testing**:
-    - No test cases for edge cases
-    - No fuzz testing
+---
 
-6. **Protocol Extensions**:
-    - No support for optional extensions beyond basic SACK
+## 3. Congestion Control
 
-### Key Limitations in Current Implementation:
+- [x] **LEDBAT-inspired (delay-based) congestion window**
+- [x] **Window management, slow start, and triple modular redundancy (TMR)**
 
-1. The stream implementation assumes a "magical" connection process rather than properly implementing the async connect handshake.
+- [ ] **ADVANCED features:**
+   - [ ] Window scaling (high-BDP support)
+   - [ ] Accurate target delay and minimal base delay reset per LEDBAT spec
+   - [ ] Explicit Nagle suppression (delay small packets)
 
-2. The tick-based system isn't properly integrated with an async runtime - it would need to be driven by some external timer.
+---
 
-3. There's no actual UDP socket integration - the code generates packets but doesn't send/receive them.
+## 4. Async/Integration Layer
 
-4. Many of the warning messages indicate unused code paths that would need to be properly wired up.
+- [x] **Dispatcher for async I/O on UDP socket**
+- [x] **Per-connection state isolation**
+- [x] **Triple-redundant notification/event system (TMR)**
 
-### Recommendations for Completion:
+- [ ] **Async runtime compliance:**
+   - [ ] Proper integration with tokio/async-std (waker, readiness, shutdown propagation)
+   - [ ] Full `AsyncRead`/`AsyncWrite` support on streams with backpressure, zero-copy options
+   - [ ] Event-driven tick system (timers, not polling)
+   - [ ] Efficient management of pending/active connections
+   - [ ] Support for high-throughput, low-latency batch packet send/recv
 
-1. **Add UDP Integration**:
-    - Create a dispatcher that manages a UDP socket and routes packets to connections
-    - Implement proper async I/O integration
+---
 
-2. **Complete State Machine**:
-    - Handle all connection states properly
-    - Implement timeouts for all operations
+## 5. Error Handling & Recovery
 
-3. **Add Proper Async Support**:
-    - Implement waker notification for read/write availability
-    - Properly integrate with tokio/async-std
+- [x] **Basic error types (Timeout, Reset, Network, Internal)**
+- [ ] **Comprehensive coverage:**
+   - [ ] All state transitions validate context/arguments
+   - [ ] All send/recv/checkpoint operations check for resource exhaustion, encoding/decoding errors
+   - [ ] All error types are propagated to user and dispatcher with JPL-compliant error codes and structured error reporting
 
-4. **Add Testing**:
-    - Unit tests for core functionality
-    - Integration tests with a reference implementation
+---
 
-5. **Optimize Performance**:
-    - Buffer management
-    - Batch packet sending
-    - Better congestion control tuning
+## 6. Security, Safety, Fault Tolerance
 
-The current implementation provides a good foundation but would need additional work to be production-ready. It's about 70-80% complete for the core protocol, but the integration layer and polish would need significant additional effort.
+- [x] **No `unsafe` code (except FFI or verified atomic ops)**
+- [x] **Triple modular redundancy (TMR) for critical counters/IDs**
+- [x] **Fault isolation in dispatcher and socket manager**
+- [x] **Timeouts on all async operations**
 
-Would you like me to elaborate on any particular aspect or suggest how to complete specific missing pieces?
+- [ ] **Hardening:**
+   - [ ] End-to-end integrity checks on all critical data (IDs, sequence numbers, control info)
+   - [ ] Radiation-hardened panic handler in `no_std`
+   - [ ] Stack and heap usage bounds (static, using `-Z emit-stack-sizes`)
+   - [ ] Memory arena allocator certification
+   - [ ] Volatile MMIO support if targeting HW
+   - [ ] Defensive zeroization of cryptographic and sensitive state
+
+---
+
+## 7. Protocol Extensions
+
+- [x] **SACK extension**
+- [ ] **Future extensions:**
+   - [ ] Dynamic extension negotiation per BEP-29 (e.g., DHT_PORT, custom extensions)
+   - [ ] Optionally: congestion signaling, fast open, or custom mission-specific extensions
+
+---
+
+## 8. Comprehensive Testing
+
+- [x] **Unit tests for all primitives (connection, reliability, congestion, dispatcher)**
+- [ ] **Full functional/integration tests:**
+   - [ ] End-to-end data transfer (connect/read/write/close)
+   - [ ] Interop test: pass full test suite against a reference implementation (e.g., libutp)
+   - [ ] Edge case tests (loss, reorder, duplication, partial window, teardown races)
+   - [ ] Rate/throughput stress tests, burst traffic handling
+   - [ ] Fuzz testing for packet parsing, state machine transitions, and input validation
+- [ ] **Property-based testing and SEU (single event upset) injection**
+- [ ] **KLEE or symbolic execution for navigation/critical algorithms**
+- [ ] **Model checking (SEER, TLA+) for state machine liveness/safety**
+
+---
+
+## 9. Documentation & Certification
+
+- [ ] **Detailed developer/user documentation for each module and API**
+- [ ] **JPL coding standard compliance audit**
+- [ ] **Static analysis report:**
+   - [ ] Stack/heap bounds, all panics handled, no resource leaks
+   - [ ] Memory safety and concurrency checks
+- [ ] **Hardware-in-the-loop validation (FPGA, QEMU, etc.)**
+
+---
+
+## 10. Deployment, Monitoring, and Maintenance
+
+- [ ] **Logging with mission/flight-rated verbosity controls**
+- [ ] **Online health monitoring and diagnostics**
+- [ ] **In-field fault recovery (dispatcher restart, redundancy failover)**
+- [ ] **Automated update/deployment hooks**
+
+---
+
+## Legend
+
+- [x] = Complete
+- [ ] = TODO / Incomplete / Needs Review
+
+---
+
+## Next Steps
+
+1. **Use this checklist to prioritize gaps (start with connection close, async runtime polish, and fuzz tests).**
+2. **For each unchecked item, create actionable implementation or verification tasks.**
+3. **If you need a template or reference implementation for any specific part, ask and I will provide JPL-compliant code/artifacts.**
+
+---

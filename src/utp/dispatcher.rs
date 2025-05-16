@@ -59,8 +59,13 @@ pub enum DispatcherCommand {
     Shutdown,
     /// Heartbeat (no-op, used to detect channel closure)
     Heartbeat,
+    
+    /// Register a listener for incoming connections
+    RegisterListener(SocketAddr, mpsc::Sender<Mutex<UtpSocket>>),
+    
     /// Unregister a listener
     UnregisterListener(SocketAddr),
+    
 }
 
 /// Notifications sent by the dispatcher to interested parties
@@ -240,6 +245,13 @@ impl UtpDispatcher {
                             let mut listeners = self.listeners.write().await;
                             listeners.remove(&addr);
                         },
+                        
+                        Some(DispatcherCommand::RegisterListener(addr, tx)) => {
+                            let mut listeners = self.listeners.write().await;
+                            listeners.insert(addr, tx);
+                        },
+                        
+                        
                         None => {
                             // Command channel closed, stop the dispatcher
                             self.running.store(false, Ordering::Release);

@@ -117,7 +117,7 @@ fn main() {
     println!("BitTorrent client shutting down...");
 }
 
-// To build a full client, each module (utp, tracker, peer, piece, torrent_parser) 
+// To build a full client, each module (utp, tracker, peer, piece, torrent_parser)
 // must be thoroughly implemented with the actual protocol details.
 // Asynchronous networking (e.g., using Tokio or async-std) is crucial for handling
 // multiple peer connections and I/O operations efficiently.

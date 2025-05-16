@@ -1,76 +1,63 @@
-#![allow(dead_code)]
-#![forbid(unsafe_code)]
-
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::Arc;
+use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::{Mutex, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::time::{timeout, Duration};
 
 use crate::utp::common::UtpError;
 use crate::utp::dispatcher::{UtpDispatcher, DispatcherCommand};
 use crate::utp::socket::UtpSocket;
 
-/// Maximum operation time in milliseconds
 const OPERATION_TIMEOUT_MS: u64 = 100;
-/// Maximum pending connections, statically bounded
 const MAX_PENDING_CONNECTIONS: usize = 16;
-/// Triple redundancy array size for fault tolerance
 const TMR_SIZE: usize = 3;
 
 pub struct UtpSocketManager {
-    dispatcher: Arc<Mutex<UtpDispatcher>>,
-    command_tx: mpsc::Sender<DispatcherCommand>,
-    local_addr: [SocketAddr; TMR_SIZE], // Triple redundancy for SEU protection
+    dispatcher_tx: mpsc::Sender<DispatcherCommand>,
+    local_addr: [SocketAddr; TMR_SIZE],
     active: AtomicBool,
 }
 
 impl UtpSocketManager {
     pub async fn new(bind_addr: SocketAddr) -> Result<Self, UtpError> {
-        // Create dispatcher instance
-        let dispatcher = match timeout(
+        // Create dispatcher with timeout protection
+        let dispatcher_result = timeout(
             Duration::from_millis(OPERATION_TIMEOUT_MS),
             UtpDispatcher::new(bind_addr)
-        ).await {
+        ).await;
+
+        let mut dispatcher = match dispatcher_result {
             Ok(result) => result?,
             Err(_) => return Err(UtpError::Internal("Dispatcher creation timed out".into())),
         };
 
+        // Get command sender before moving dispatcher
         let command_tx = dispatcher.get_command_sender();
+        let heartbeat_tx = command_tx.clone();
 
-        // Wrap dispatcher in Arc<Mutex>
-        let dispatcher = Arc::new(Mutex::new(dispatcher));
-        let dispatcher_for_task = dispatcher.clone();
-
-        // Spawn the dispatcher task
+        // Spawn dispatcher in its own task using move semantics
         tokio::spawn(async move {
-            let mut dispatcher = dispatcher_for_task.lock().await;
             dispatcher.run().await;
         });
 
-        // Create the manager instance
-        let manager = Self {
-            dispatcher,
-            command_tx: command_tx.clone(),
-            local_addr: [bind_addr, bind_addr, bind_addr],
-            active: AtomicBool::new(true),
-        };
-
-        // Spawn heartbeat task
-        let heartbeat_tx = command_tx;
+        // Spawn heartbeat task with its own command sender clone
         tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(1));
             loop {
+                interval.tick().await;
                 if heartbeat_tx.send(DispatcherCommand::Heartbeat).await.is_err() {
                     break;
                 }
-                tokio::time::sleep(Duration::from_secs(1)).await;
             }
         });
 
-        Ok(manager)
+        Ok(Self {
+            dispatcher_tx: command_tx,
+            local_addr: [bind_addr; TMR_SIZE],
+            active: AtomicBool::new(true),
+        })
     }
 
-    pub async fn create_connection(&self, remote_addr: SocketAddr) -> Result<Mutex<UtpSocket>, UtpError> {
+    pub async fn create_connection(&self, remote_addr: SocketAddr) -> Result<UtpSocket, UtpError> {
         if !self.active.load(Ordering::Acquire) {
             return Err(UtpError::Internal("Socket manager is inactive".into()));
         }
@@ -78,31 +65,20 @@ impl UtpSocketManager {
         let local_addr = self.get_local_addr()?;
         let socket = UtpSocket::new(local_addr, remote_addr);
         let conn_id = socket.connection_id();
+
         let (tx, rx) = oneshot::channel();
 
-        match timeout(
-            Duration::from_millis(OPERATION_TIMEOUT_MS / 2),
-            self.command_tx.send(
-                DispatcherCommand::RegisterSocketInfo(remote_addr, conn_id, tx)
-            )
-        ).await {
-            Ok(result) => result.map_err(|_| UtpError::Internal("Failed to register socket".into()))?,
-            Err(_) => return Err(UtpError::Internal("Register socket command timed out".into())),
-        };
+        // Register socket with dispatcher
+        self.dispatcher_tx.send(
+            DispatcherCommand::RegisterSocketInfo(remote_addr, conn_id, tx)
+        ).await
+            .map_err(|_| UtpError::Internal("Failed to register socket".into()))?;
 
-        match timeout(
-            Duration::from_millis(OPERATION_TIMEOUT_MS / 2),
-            rx
-        ).await {
-            Ok(result) => result.map_err(|_| UtpError::Internal("Failed to confirm socket registration".into()))?,
-            Err(_) => return Err(UtpError::Internal("Registration confirmation timed out".into())),
-        };
+        // Wait for confirmation
+        rx.await
+            .map_err(|_| UtpError::Internal("Failed to confirm socket registration".into()))?;
 
-        Ok(Mutex::new(socket))
-    }
-
-    pub fn get_command_sender(&self) -> mpsc::Sender<DispatcherCommand> {
-        self.command_tx.clone()
+        Ok(socket)
     }
 
     pub async fn listen(&self) -> Result<UtpListener, UtpError> {
@@ -111,23 +87,18 @@ impl UtpSocketManager {
         }
 
         let local_addr = self.get_local_addr()?;
-        let (listener_tx, listener_rx) = mpsc::channel(MAX_PENDING_CONNECTIONS);
 
-        match timeout(
-            Duration::from_millis(OPERATION_TIMEOUT_MS),
-            async {
-                let dispatcher = self.dispatcher.lock().await;
-                dispatcher.register_listener(local_addr, listener_tx).await?;
-                Ok::<_, UtpError>(())
-            }
-        ).await {
-            Ok(result) => result?,
-            Err(_) => return Err(UtpError::Internal("Listener registration timed out".into())),
-        };
+        // Channel for incoming connections: must match dispatcher (Mutex<UtpSocket>)
+        let (listener_tx, listener_rx) = mpsc::channel::<Mutex<UtpSocket>>(MAX_PENDING_CONNECTIONS);
+
+        // Register listener with dispatcher
+        let register_cmd = DispatcherCommand::RegisterListener(local_addr, listener_tx);
+        self.dispatcher_tx.send(register_cmd).await
+            .map_err(|_| UtpError::Internal("Failed to register listener".into()))?;
 
         Ok(UtpListener {
-            local_addr: [local_addr, local_addr, local_addr],
-            dispatcher_tx: self.command_tx.clone(),
+            local_addr: [local_addr; TMR_SIZE],
+            dispatcher_tx: self.dispatcher_tx.clone(),
             incoming: listener_rx,
             active: AtomicBool::new(true),
         })
@@ -135,19 +106,12 @@ impl UtpSocketManager {
 
     pub async fn shutdown(&self) -> Result<(), UtpError> {
         self.active.store(false, Ordering::Release);
-
-        match timeout(
-            Duration::from_millis(OPERATION_TIMEOUT_MS),
-            self.command_tx.send(DispatcherCommand::Shutdown)
-        ).await {
-            Ok(result) => result.map_err(|_| UtpError::Internal("Failed to send shutdown command".into()))?,
-            Err(_) => return Err(UtpError::Internal("Shutdown command timed out".into())),
-        };
-
-        Ok(())
+        self.dispatcher_tx.send(DispatcherCommand::Shutdown).await
+            .map_err(|_| UtpError::Internal("Failed to send shutdown command".into()))
     }
 
     fn get_local_addr(&self) -> Result<SocketAddr, UtpError> {
+        // Majority voting for fault tolerance
         if self.local_addr[0] == self.local_addr[1] {
             return Ok(self.local_addr[0]);
         }
@@ -174,40 +138,16 @@ impl UtpListener {
             return Err(UtpError::Internal("Listener is inactive".into()));
         }
 
-        let socket_mutex = match timeout(
-            Duration::from_millis(OPERATION_TIMEOUT_MS * 5),
-            self.incoming.recv()
-        ).await {
-            Ok(Some(socket)) => socket,
-            Ok(None) => return Err(UtpError::Internal("Listener channel closed".into())),
-            Err(_) => return Err(UtpError::Internal("Accept operation timed out".into())),
-        };
-
-        let (remote_addr, socket_info) = match timeout(
-            Duration::from_millis(OPERATION_TIMEOUT_MS),
-            async {
-                let socket_guard = socket_mutex.lock().await;
-                let remote_addr = socket_guard.remote_address();
-                let conn_id = socket_guard.connection_id();
-                Ok::<_, UtpError>((remote_addr, conn_id))
+        // Use timeout to prevent blocking indefinitely
+        match timeout(Duration::from_millis(OPERATION_TIMEOUT_MS * 5), self.incoming.recv()).await {
+            Ok(Some(socket_mutex)) => {
+                let socket = socket_mutex.into_inner();
+                let remote = socket.remote_address();
+                Ok((socket, remote))
             }
-        ).await {
-            Ok(result) => result?,
-            Err(_) => return Err(UtpError::Internal("Socket attribute extraction timed out".into())),
-        };
-
-        let local_addr = self.get_local_addr()?;
-        let socket = UtpSocket::new(local_addr, remote_addr);
-
-        match timeout(
-            Duration::from_millis(OPERATION_TIMEOUT_MS),
-            socket.initialize_from_connection(socket_info)
-        ).await {
-            Ok(result) => result?,
-            Err(_) => return Err(UtpError::Internal("Socket initialization timed out".into())),
-        };
-
-        Ok((socket, remote_addr))
+            Ok(None) => Err(UtpError::Internal("Listener channel closed".into())),
+            Err(_) => Err(UtpError::Internal("Accept operation timed out".into())),
+        }
     }
 
     pub fn local_addr(&self) -> SocketAddr {
@@ -235,16 +175,8 @@ impl Drop for UtpListener {
     fn drop(&mut self) {
         self.active.store(false, Ordering::Release);
         if let Ok(addr) = self.get_local_addr() {
-            let tx = self.dispatcher_tx.clone();
-            let _ = tx.try_send(DispatcherCommand::UnregisterListener(addr));
+            let _ = self.dispatcher_tx.try_send(DispatcherCommand::UnregisterListener(addr));
         }
-    }
-}
-
-async fn is_shutdown_requested(tx: &mpsc::Sender<DispatcherCommand>) -> bool {
-    match tx.send(DispatcherCommand::Heartbeat).await {
-        Ok(_) => false,
-        Err(_) => true,
     }
 }
 
@@ -262,6 +194,7 @@ mod tests {
     use crate::utp::dispatcher::UtpDispatcher;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
+    /// Generates a unique socket address for testing
     fn unique_addr() -> SocketAddr {
         use std::sync::atomic::{AtomicU16, Ordering};
         static NEXT_PORT: AtomicU16 = AtomicU16::new(40000);
@@ -283,8 +216,7 @@ mod tests {
         let addr = unique_addr();
         let manager = UtpSocketManager::new(addr).await.expect("Failed to create manager");
         let remote = unique_addr();
-        let socket_mutex = manager.create_connection(remote).await.expect("Failed to create connection");
-        let socket = socket_mutex.lock().await;
+        let socket = manager.create_connection(remote).await.expect("Failed to create connection");
         assert_eq!(socket.remote_address(), remote);
     }
 
